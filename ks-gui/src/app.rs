@@ -37,10 +37,10 @@ mod win32 {
     }
 }
 
-/// Whole-UI scale, matching the ks-td2 overlay. `Ctrl +/-/0` zoom is
-/// disabled: while another window (the game) owns input, egui's keyboard
-/// zoom would rescale the overlay in the middle of aiming.
-pub(crate) const UI_SCALE: f32 = 0.8;
+const DEFAULT_UI_SCALE: u16 = 100;
+const UI_SCALE_STEP: u16 = 5;
+const MAX_UI_SCALE: u16 = 200;
+const UI_SCALE_KEY: &str = "gui.ui_scale_percent";
 
 /// Overlay presentation cadence: 100 Hz. Lua `OnUpdate` runs once per
 /// presented frame, i.e. at this rate.
@@ -55,6 +55,9 @@ pub(crate) struct KernelScriptApp {
     pub(crate) quit_requested: bool,
     /// Smoothed actual presentation rate, shown top-right.
     pub(crate) fps_ema: f32,
+    show_fps: bool,
+    ui_scale_percent: u16,
+    ui_scale_draft: u16,
     last_frame_at: Instant,
 }
 
@@ -65,11 +68,28 @@ impl KernelScriptApp {
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let script_dir = exe_dir.join("scripts");
-        // The manager runs every script's OnStart before this, so no Lua
-        // round trip can overlap the probe the control spawns in `new`.
+        // Lua initialization waits until the first frames have been shown
+        // and the driver's startup job has completed.
         let runtime = LuaRuntimeManager::new(script_dir)?;
         // Restore the UI language before the first frame renders.
         crate::lang::restore(&runtime.config_store());
+        let (show_fps, ui_scale_percent) = {
+            let config = runtime.config_store();
+            let store = config.lock().unwrap();
+            let show_fps = match store.get("gui.show_fps") {
+                Some(crate::config_store::ConfigValue::Bool(value)) => value,
+                _ => true,
+            };
+            let ui_scale = match store.get(UI_SCALE_KEY) {
+                Some(crate::config_store::ConfigValue::Int(value)) => {
+                    let step = i64::from(UI_SCALE_STEP);
+                    let bounded = value.clamp(i64::from(DEFAULT_UI_SCALE), i64::from(MAX_UI_SCALE));
+                    ((bounded + step / 2) / step * step) as u16
+                }
+                _ => DEFAULT_UI_SCALE,
+            };
+            (show_fps, ui_scale)
+        };
         Ok(Self {
             driver: crate::driver::DriverControl::new(),
             runtime,
@@ -78,6 +98,9 @@ impl KernelScriptApp {
             insert_was_down: false,
             quit_requested: false,
             fps_ema: 0.0,
+            show_fps,
+            ui_scale_percent,
+            ui_scale_draft: ui_scale_percent,
             last_frame_at: Instant::now(),
         })
     }
@@ -110,6 +133,10 @@ impl KernelScriptApp {
         self.ui_visible
     }
 
+    pub(super) fn ui_scale(&self) -> f32 {
+        f32::from(self.ui_scale_percent) / 100.0
+    }
+
     pub(crate) fn driver(&mut self) -> &mut crate::driver::DriverControl {
         &mut self.driver
     }
@@ -132,12 +159,12 @@ impl KernelScriptApp {
         self.fonts_installed = true;
     }
 
-    /// The overlay's only chrome: driver status, the language toggle and
-    /// the quit button. The memory tool is a separate application
-    /// (`ks-inspector`), so the overlay no longer opens or embeds it.
+    /// The overlay's control window: driver status, language, display settings and quit.
     pub(crate) fn control_window(&mut self, ctx: &egui::Context, ui_rect: &UiRectHandle) {
         let strings = crate::lang::s();
         let mut quit = false;
+        let mut fps_changed = false;
+        let mut scale_changed = false;
         let response = egui::Window::new(strings.overlay_title)
             .default_pos(egui::pos2(16.0, 16.0))
             .resizable(false)
@@ -159,12 +186,47 @@ impl KernelScriptApp {
                         quit = true;
                     }
                 });
+                fps_changed = ui.checkbox(&mut self.show_fps, strings.show_fps).changed();
+                ui.label(format!("{} · {}%", strings.ui_scale, self.ui_scale_draft));
+                let slider = ui.add(
+                    egui::Slider::new(&mut self.ui_scale_draft, DEFAULT_UI_SCALE..=MAX_UI_SCALE)
+                        .step_by(f64::from(UI_SCALE_STEP))
+                        .show_value(false),
+                );
+                if ui.button(strings.reset_ui_scale).clicked() {
+                    self.ui_scale_draft = DEFAULT_UI_SCALE;
+                }
+                // Keep the slider geometry steady until the user releases it.
+                if !slider.is_pointer_button_down_on()
+                    && self.ui_scale_draft != self.ui_scale_percent
+                {
+                    self.ui_scale_percent = self.ui_scale_draft;
+                    scale_changed = true;
+                }
             });
         if let Some(response) = response {
             crate::lua_runtime::ui_api::record_ui_rect(ui_rect, response.response.rect);
         }
         if quit {
             self.quit_requested = true;
+        }
+        if fps_changed || scale_changed {
+            let config = self.runtime.config_store();
+            if let Ok(mut store) = config.lock() {
+                if fps_changed {
+                    store.set(
+                        "gui.show_fps",
+                        crate::config_store::ConfigValue::Bool(self.show_fps),
+                    );
+                }
+                if scale_changed {
+                    store.set(
+                        UI_SCALE_KEY,
+                        crate::config_store::ConfigValue::Int(i64::from(self.ui_scale_percent)),
+                    );
+                }
+                store.flush();
+            };
         }
     }
 
@@ -188,7 +250,9 @@ impl KernelScriptApp {
         }
         let commands = self.runtime.take_draw_commands();
         crate::overlay::paint_commands(ctx, &commands, origin);
-        crate::overlay::paint_fps(ctx, fps);
+        if self.show_fps {
+            crate::overlay::paint_fps(ctx, fps);
+        }
     }
 
     /// EMA-smoothed presentation rate, sampled once per displayed tick.

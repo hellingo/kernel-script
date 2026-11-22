@@ -63,7 +63,7 @@
    pointer passthrough and a 100 Hz display loop with a top-right FPS
    readout. The memory tool is no longer
    embedded here: its only chrome is a small control window showing the
-   driver phase, the `中文 / EN` toggle and the `退出程序` button (which
+   driver phase, the `TR / EN` toggle and the `Çıkış` button (which
    only closes the overlay; the driver shutdown runs after the render loop
    returns, in `driver::finish_on_exit`). Runs elevated (embedded
    `requireAdministrator` manifest) because the driver's section DACL only
@@ -189,7 +189,7 @@ Rules:
   the process list on the left, a full-width log bar at the bottom (driver
   phase plus lifecycle/startup
   log) and a tabbed centre (`内存查看` / `Lua 脚本` / `修改`, also
-  Ctrl+1/2/3). A `中文 / EN` toggle sits at the top-right of the tab row
+  Ctrl+1/2/3). A `TR / EN` toggle sits at the top-right of the tab row
   (and in the overlay's control window) and switches the whole UI
   language; the choice persists in `config.json` under `gui.language` and
   is restored before the first frame. Both languages are two `Strings`

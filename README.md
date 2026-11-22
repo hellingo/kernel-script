@@ -64,7 +64,7 @@ ks-gui Lua (synchronous call)      ks-inspector worker (synchronous call)
   top-right FPS readout.
 - Standalone `ks-inspector` memory tool: process list, paged hex viewer
   anchored at the module base, Lua script editor, value editor and the
-  driver's whole lock table, with a `中文 / EN` switch that persists in
+  driver's whole lock table, with a `TR / EN` switch that persists in
   `config.json`. It is an ordinary decorated, opaque window (D3D11, no
   transparency or click-through — those belong to the overlay only). It
   reuses the same driver as `ks-gui` (the single-instance
@@ -245,7 +245,7 @@ is hidden.
 
 The `KernelScript` control window is the overlay's only chrome: it shows the
 current driver state (`probing...`, `starting...`, `running`, or the start
-error in red), the `中文 / EN` switch and the `退出程序` / `Quit` button. The
+error in red), the `TR / EN` switch and the `Çıkış` / `Quit` button. The
 button closes the overlay; once the render loop returns `ks-gui` joins the
 shared shutdown path (`driver::finish_on_exit`) and drops the process-wide
 session. At launch a startup probe reuses a live driver or starts the

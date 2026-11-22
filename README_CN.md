@@ -49,7 +49,7 @@ ks-gui Lua（同步调用）              ks-inspector worker（同步调用）
   100Hz，右上角显示 FPS。
 - 独立的 `ks-inspector` 内存工具：进程列表、以模块基址为锚点分页的十六进制
   视图、Lua 脚本编辑器、数值修改器和驱动完整锁表，并带一个把选择持久化到
-  `config.json` 的 `中文 / EN` 开关。它是普通的带边框不透明窗口（D3D11，
+  `config.json` 的 `TR / EN` 开关。它是普通的带边框不透明窗口（D3D11，
   没有透明/点击穿透，那些只属于覆盖层）。它与 `ks-gui` 共用同一个驱动
   （单实例守卫让第二个程序直接接管已存在的实例）。
 - `ks-link` 在用户态使用 Toolhelp 枚举进程并按进程名查 PID，经 `ks-sdk`
@@ -187,7 +187,7 @@ Administrators，因此 `ks-gui` 和 `ks-inspector`（都内嵌
 
 `KernelScript` 控制窗口是 overlay 唯一的界面：显示当前驱动状态
 （`probing...` / `starting...` / `running`，启动失败时红字显示错误）、
-`中文 / EN` 开关和 `退出程序` / `Quit` 按钮。按钮关闭 overlay 后，渲染循环
+`TR / EN` 开关和 `Çıkış` / `Quit` 按钮。按钮关闭 overlay 后，渲染循环
 返回时 `ks-gui` 进入共享退出路径（`driver::finish_on_exit`）并释放进程级
 会话。启动时的探测发现存活驱动则复用，否则在后台 worker 中进程内映射内置
 镜像——生命周期叙事写入 `ks-gui.log`；启停进行期间 Lua 内存调用立即返回

@@ -9,10 +9,8 @@ use crate::lua_runtime::DrawCommand;
 /// `memory.get_window_rect` returns), so the painter subtracts it to get
 /// window-local points.
 ///
-/// Despite the name, `ctx.zoom_factor()` makes egui's point space
-/// `logical / zoom_factor`; everything is multiplied by `s = 1/zoom` so the
-/// overlay keeps tracking the game window at any whole-UI scale (the host
-/// fixes it at 0.8, like ks-td2).
+/// Convert logical units to egui points by undoing only the menu zoom.
+/// The renderer still applies native DPI once to each position and size.
 pub fn paint_commands(ctx: &Context, commands: &[DrawCommand], origin: (f32, f32)) {
     if commands.is_empty() {
         return;

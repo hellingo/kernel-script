@@ -1,4 +1,4 @@
-//! UI language: Simplified Chinese (default) or English.
+//! UI language: Turkish (default) or English.
 //!
 //! Both tables are `Strings` structs, so a key that exists in one language
 //! must exist in the other — a missing translation is a compile error, not
@@ -6,7 +6,7 @@
 //! on a single thread and the worker only reads it), toggled from the
 //! top-right corner of `ks-inspector`'s tab row (and of the overlay's
 //! control window), and persisted in the Lua config store as
-//! `gui.language` (`"zh"` / `"en"`). Both apps read the same `config.json`
+//! `gui.language` (`"tr"` / `"en"`). Both apps read the same `config.json`
 //! when they live in one directory, so the choice carries over.
 
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -18,36 +18,36 @@ pub const CONFIG_KEY: &str = "gui.language";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Lang {
-    Zh,
+    Tr,
     En,
 }
 
-const ZH_TAG: u8 = 0;
+const TR_TAG: u8 = 0;
 const EN_TAG: u8 = 1;
 
-static CURRENT: AtomicU8 = AtomicU8::new(ZH_TAG);
+static CURRENT: AtomicU8 = AtomicU8::new(TR_TAG);
 
 /// The active language.
 pub fn lang() -> Lang {
     if CURRENT.load(Ordering::Relaxed) == EN_TAG {
         Lang::En
     } else {
-        Lang::Zh
+        Lang::Tr
     }
 }
 
 /// The string table for the active language.
 pub fn s() -> &'static Strings {
     match lang() {
-        Lang::Zh => &ZH,
+        Lang::Tr => &TR,
         Lang::En => &EN,
     }
 }
 
-/// The persisted code for `lang` (`"zh"` / `"en"`).
+/// The persisted code for `lang` (`"tr"` / `"en"`).
 pub fn code(lang: Lang) -> &'static str {
     match lang {
-        Lang::Zh => "zh",
+        Lang::Tr => "tr",
         Lang::En => "en",
     }
 }
@@ -56,7 +56,7 @@ pub fn code(lang: Lang) -> &'static str {
 pub fn set_lang(lang: Lang) {
     CURRENT.store(
         match lang {
-            Lang::Zh => ZH_TAG,
+            Lang::Tr => TR_TAG,
             Lang::En => EN_TAG,
         },
         Ordering::Relaxed,
@@ -74,7 +74,7 @@ pub fn set_lang_persist(lang: Lang, config: &SharedConfigStore) {
 }
 
 /// Restores the persisted language, if one is recorded. Unknown values
-/// leave the default (Chinese) in place.
+/// leave the default (Turkish) in place.
 pub fn restore(config: &SharedConfigStore) {
     let Ok(store) = config.lock() else {
         return;
@@ -82,7 +82,7 @@ pub fn restore(config: &SharedConfigStore) {
     if let Some(ConfigValue::Str(code)) = store.get(CONFIG_KEY) {
         match code.as_str() {
             "en" => set_lang(Lang::En),
-            "zh" => set_lang(Lang::Zh),
+            "tr" | "zh" => set_lang(Lang::Tr), // Accept saved Chinese settings.
             _ => {}
         }
     }
@@ -105,7 +105,7 @@ pub fn fill(template: &str, args: &[&dyn std::fmt::Display]) -> String {
     out
 }
 
-/// Draws the 中文 / EN toggle (`中文` left of `EN`, rightmost is `EN`).
+/// Draws the Turkish / English toggle.
 /// `ks-inspector` right-aligns it in its tab row; the overlay's compact
 /// control window keeps it in a plain horizontal row.
 pub fn toggle_widget(ui: &mut egui::Ui, config: &SharedConfigStore) {
@@ -113,8 +113,8 @@ pub fn toggle_widget(ui: &mut egui::Ui, config: &SharedConfigStore) {
     if ui.selectable_label(current == Lang::En, "EN").clicked() && current != Lang::En {
         set_lang_persist(Lang::En, config);
     }
-    if ui.selectable_label(current == Lang::Zh, "中文").clicked() && current != Lang::Zh {
-        set_lang_persist(Lang::Zh, config);
+    if ui.selectable_label(current == Lang::Tr, "TR").clicked() && current != Lang::Tr {
+        set_lang_persist(Lang::Tr, config);
     }
 }
 
@@ -123,6 +123,9 @@ pub struct Strings {
     // Window chrome and the overlay control window.
     pub app_title: &'static str,
     pub overlay_title: &'static str,
+    pub show_fps: &'static str,
+    pub ui_scale: &'static str,
+    pub reset_ui_scale: &'static str,
     pub quit: &'static str,
     // Inspector chrome.
     pub log: &'static str,
@@ -213,84 +216,90 @@ pub struct Strings {
     pub entries_fmt: &'static str,
 }
 
-static ZH: Strings = Strings {
-    app_title: "KernelScript Inspector - 内存工具",
+static TR: Strings = Strings {
+    app_title: "KernelScript Inspector - Bellek Aracı",
     overlay_title: "KernelScript",
-    quit: "退出程序",
-    log: "日志",
-    process: "进程",
-    pid: "进程",
-    filter_hint: "过滤",
-    refresh: "刷新",
-    close: "关闭",
-    tab_hex: "内存查看 (Ctrl+1)",
-    tab_editor: "Lua 脚本 (Ctrl+2)",
-    tab_modify: "修改 (Ctrl+3)",
-    hex_start: "起始",
-    hex_no_base: "进程基址（未选择进程）",
-    length: "长度",
-    bytes_fmt: "{} 字节",
-    prev_page: "◀ 上一页",
-    next_page: "下一页 ▶",
-    page_fmt: "第 {} 页",
-    reset_base: "回到基址",
-    hex_pick_process: "从左侧选择一个进程，十六进制视图会以它的模块基址为起点。",
-    reading: "读取中...",
-    read_failed_fmt: "读取失败: {}",
-    script_dir: "脚本目录",
-    reload: "重新加载",
-    reloaded: "已从磁盘重新加载",
-    new_file_hint: "新文件名",
-    new_file: "新建",
-    save: "保存 (Ctrl+S)",
-    unsaved: "● 未保存",
-    scanned_fmt: "{} 个脚本 · {}",
-    saved_fmt: "已保存 {}（覆盖层会自动热重载）",
-    save_failed_fmt: "保存失败: {}",
-    invalid_name: "文件名无效",
-    file_exists: "文件已存在",
-    created_fmt: "已创建 {}",
-    create_failed_fmt: "创建失败: {}",
-    lock_table_fmt: "驱动锁表（含 Lua）{}",
-    unlock_all: "全部解锁",
-    lock_hint: "本窗口的锁也能在下面的地址列表里编辑",
-    no_locks: "当前没有活动的锁",
-    lock_id: "锁 ID",
-    address: "地址",
-    source: "来源",
-    this_window: "本窗口",
-    lua_other: "Lua/其他",
-    unlock: "解锁",
-    add: "添加",
-    refresh_values: "刷新数值",
-    write_changes: "写入修改",
-    unfreeze_all: "解除全部冻结",
-    col_freeze: "冻结",
-    col_type: "类型",
-    col_value: "数值",
-    no_process: "未选择进程",
-    delete: "删",
-    type_i8: "1 字节",
-    type_i16: "2 字节",
-    type_i32: "4 字节",
-    type_i64: "8 字节",
-    type_u32: "4 字节 (无符号)",
-    type_f32: "浮点",
-    type_f64: "双精度",
-    status_initial: "选择左侧进程，查看它的模块内存",
-    written: "已写入",
-    freezing: "冻结中",
-    unfrozen: "已解冻",
-    all_unfrozen: "已解除全部冻结",
-    unlocked: "已解锁",
-    process_list_fmt: "进程列表: {} 项",
-    base_failed_fmt: "模块基址读取失败: {}",
-    entries_fmt: "{} 项",
+    show_fps: "FPS göster",
+    ui_scale: "Arayüz ölçeği",
+    reset_ui_scale: "Varsayılana dön",
+    quit: "Çıkış",
+    log: "Günlük",
+    process: "Süreç",
+    pid: "PID",
+    filter_hint: "Filtrele",
+    refresh: "Yenile",
+    close: "Kapat",
+    tab_hex: "Bellek (Ctrl+1)",
+    tab_editor: "Lua Betikleri (Ctrl+2)",
+    tab_modify: "Düzenle (Ctrl+3)",
+    hex_start: "Başlangıç",
+    hex_no_base: "Süreç taban adresi (süreç seçilmedi)",
+    length: "Uzunluk",
+    bytes_fmt: "{} bayt",
+    prev_page: "◀ Önceki",
+    next_page: "Sonraki ▶",
+    page_fmt: "Sayfa {}",
+    reset_base: "Taban adrese dön",
+    hex_pick_process: "Soldan bir süreç seç. Bellek görünümü modülün taban adresinden başlar.",
+    reading: "Okunuyor…",
+    read_failed_fmt: "Okuma başarısız: {}",
+    script_dir: "Betik klasörü",
+    reload: "Yeniden yükle",
+    reloaded: "Diskten yeniden yüklendi",
+    new_file_hint: "Yeni dosya adı",
+    new_file: "Yeni",
+    save: "Kaydet (Ctrl+S)",
+    unsaved: "● Kaydedilmedi",
+    scanned_fmt: "{} betik · {}",
+    saved_fmt: "{} kaydedildi (overlay otomatik yeniden yükler)",
+    save_failed_fmt: "Kaydedilemedi: {}",
+    invalid_name: "Geçersiz dosya adı",
+    file_exists: "Dosya zaten var",
+    created_fmt: "{} oluşturuldu",
+    create_failed_fmt: "Oluşturulamadı: {}",
+    lock_table_fmt: "Sürücü kilitleri (Lua dahil){}",
+    unlock_all: "Tüm kilitleri kaldır",
+    lock_hint: "Bu penceredeki kilitleri aşağıdaki adres listesinden de düzenleyebilirsin.",
+    no_locks: "Etkin kilit yok",
+    lock_id: "Kilit kimliği",
+    address: "Adres",
+    source: "Kaynak",
+    this_window: "Bu pencere",
+    lua_other: "Lua / Diğer",
+    unlock: "Kilidi kaldır",
+    add: "Ekle",
+    refresh_values: "Değerleri yenile",
+    write_changes: "Değişiklikleri yaz",
+    unfreeze_all: "Tüm sabitlemeleri kaldır",
+    col_freeze: "Sabitle",
+    col_type: "Tür",
+    col_value: "Değer",
+    no_process: "Süreç seçilmedi",
+    delete: "Sil",
+    type_i8: "1 bayt",
+    type_i16: "2 bayt",
+    type_i32: "4 bayt",
+    type_i64: "8 bayt",
+    type_u32: "4 bayt (işaretsiz)",
+    type_f32: "Kayan nokta (32 bit)",
+    type_f64: "Kayan nokta (64 bit)",
+    status_initial: "Modül belleğini görmek için soldan bir süreç seç.",
+    written: "Yazıldı",
+    freezing: "Sabitleniyor",
+    unfrozen: "Sabitleme kaldırıldı",
+    all_unfrozen: "Tüm sabitlemeler kaldırıldı",
+    unlocked: "Kilit kaldırıldı",
+    process_list_fmt: "{} süreç",
+    base_failed_fmt: "Modülün taban adresi okunamadı: {}",
+    entries_fmt: "{} kayıt",
 };
 
 static EN: Strings = Strings {
     app_title: "KernelScript Inspector - Memory Tool",
     overlay_title: "KernelScript",
+    show_fps: "Show FPS",
+    ui_scale: "UI Scale",
+    reset_ui_scale: "Reset to default",
     quit: "Quit",
     log: "Log",
     process: "Process",
@@ -369,12 +378,12 @@ mod tests {
 
     #[test]
     fn toggle_switches_tables() {
-        set_lang(Lang::Zh);
-        assert_eq!(s().refresh, "刷新");
+        set_lang(Lang::Tr);
+        assert_eq!(s().refresh, "Yenile");
         set_lang(Lang::En);
         assert_eq!(s().refresh, "Refresh");
-        set_lang(Lang::Zh);
-        assert_eq!(s().refresh, "刷新");
+        set_lang(Lang::Tr);
+        assert_eq!(s().refresh, "Yenile");
     }
 
     #[test]
@@ -383,6 +392,7 @@ mod tests {
         let all = [
             en.app_title,
             en.overlay_title,
+            en.show_fps,
             en.quit,
             en.log,
             en.process,
@@ -464,7 +474,7 @@ mod tests {
 
     #[test]
     fn codes_round_trip() {
-        assert_eq!(code(Lang::Zh), "zh");
+        assert_eq!(code(Lang::Tr), "tr");
         assert_eq!(code(Lang::En), "en");
     }
 }

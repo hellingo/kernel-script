@@ -16,7 +16,7 @@ use egui_overlay::egui_window_glfw_passthrough::{
 };
 use egui_render_d3d11::D3D11Backend;
 
-use super::{KernelScriptApp, FRAME_INTERVAL, UI_SCALE};
+use super::{KernelScriptApp, FRAME_INTERVAL};
 
 /// Transparent fullscreen overlay window + its D3D11 renderer.
 pub(super) fn create_overlay_window() -> (GlfwBackend, D3D11Backend) {
@@ -84,47 +84,79 @@ pub(super) fn create_overlay_window() -> (GlfwBackend, D3D11Backend) {
     (overlay, gfx)
 }
 
-/// Presents one egui pass. Kept byte-for-byte in step with ks-td2's contract:
-/// `RawInput` arrives in native logical units, but egui's zoom makes its
-/// points space `logical / zoom_factor`; divide input and let the renderer
-/// divide by the same zoom.
+/// GLFW input arrives in DPI-adjusted logical units. Map it to egui points
+/// using only the user's zoom, and use the same point size for rendering.
 fn render_pass(
     ctx: &egui::Context,
     gfx: &mut D3D11Backend,
     backend: &mut GlfwBackend,
+    ui_scale: f32,
     ui: impl FnMut(&mut egui::Ui),
 ) {
+    let (width, height) = backend.window.get_framebuffer_size();
+    let framebuffer = [width.max(1) as u32, height.max(1) as u32];
     if backend.resized_event_pending {
-        let latest = backend.window.get_framebuffer_size();
-        gfx.resize_framebuffer([latest.0.max(1) as u32, latest.1.max(1) as u32]);
+        gfx.resize_framebuffer(framebuffer);
         backend.resized_event_pending = false;
     }
     let mut input = backend.take_raw_input();
-    let zoom_in = ctx.zoom_factor();
-    if (zoom_in - 1.0).abs() > 1e-4 {
-        let inverse = 1.0 / zoom_in;
-        if let Some(rect) = input.screen_rect.as_mut() {
-            rect.min = egui::pos2(rect.min.x * inverse, rect.min.y * inverse);
-            rect.max = egui::pos2(rect.max.x * inverse, rect.max.y * inverse);
-        }
-        for event in &mut input.events {
-            match event {
-                egui::Event::PointerMoved(position) => {
-                    *position = egui::pos2(position.x * inverse, position.y * inverse);
-                }
-                egui::Event::PointerButton { pos, .. } => {
-                    *pos = egui::pos2(pos.x * inverse, pos.y * inverse);
-                }
-                egui::Event::MouseWheel { delta, .. } => {
-                    *delta = egui::vec2(delta.x * inverse, delta.y * inverse);
-                }
-                _ => {}
+    let native_scale = backend.scale;
+    let pixels_per_point = native_scale * ui_scale;
+    let screen_size = framebuffer.map(|pixels| pixels as f32 / pixels_per_point);
+    let screen_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, screen_size.into());
+    input.screen_rect = Some(screen_rect);
+    input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(native_scale);
+
+    for event in &mut input.events {
+        match event {
+            egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } => {
+                *pos = (pos.to_vec2() / ui_scale).to_pos2();
             }
+            egui::Event::MouseWheel { delta, .. } => *delta /= ui_scale,
+            _ => {}
         }
     }
 
-    let framebuffer = backend.window.get_framebuffer_size();
-    gfx.prepare_frame([framebuffer.0.max(1) as u32, framebuffer.1.max(1) as u32]);
+    if ctx.cumulative_frame_nr() == 0
+        || ctx.zoom_factor() != ui_scale
+        || ctx.pixels_per_point() != pixels_per_point
+    {
+        tracing::info!(
+            ?framebuffer,
+            native_scale,
+            ui_scale,
+            pixels_per_point,
+            ?screen_size,
+            "overlay frame scale"
+        );
+        // egui keeps the last pointer position until it sees a new event.
+        // Refresh it on scale changes even when the mouse was stationary.
+        if ctx.input(|state| state.pointer.hover_pos().is_some())
+            && !input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerMoved(_)
+                        | egui::Event::PointerGone
+                        | egui::Event::PointerButton { .. }
+                )
+            })
+        {
+            let pos = (egui::Vec2::from(backend.cursor_pos) / ui_scale).to_pos2();
+            input.events.push(if screen_rect.contains(pos) {
+                egui::Event::PointerMoved(pos)
+            } else {
+                egui::Event::PointerGone
+            });
+        }
+    }
+    // set_zoom_factor queues a change that overwrites this frame's screen rect
+    // from the previous frame. We already supply the new rect and pointer data.
+    ctx.options_mut(|options| options.zoom_factor = ui_scale);
+    gfx.prepare_frame(framebuffer);
     let egui::FullOutput {
         platform_output,
         textures_delta,
@@ -139,17 +171,7 @@ fn render_pass(
         .min()
         .unwrap_or(Duration::from_millis(10));
     let meshes = ctx.tessellate(shapes, pixels_per_point);
-    // Renderer sees the screen size in egui points at the current ppp:
-    // fb / zoom = logical * native / (zoom * native) = logical / zoom.
-    let zoom_out = (pixels_per_point / backend.scale.max(1e-6)).max(1e-6);
-    gfx.render_egui(
-        meshes,
-        textures_delta,
-        [
-            backend.window_size_logical[0] / zoom_out,
-            backend.window_size_logical[1] / zoom_out,
-        ],
-    );
+    gfx.render_egui(meshes, textures_delta, screen_size);
     gfx.present();
     for command in &platform_output.commands {
         if let egui::OutputCommand::CopyText(text) = command {
@@ -173,9 +195,8 @@ struct RegionState {
 impl RegionState {
     /// Panel-union rect in physical screen pixels.
     ///
-    /// egui points -> framebuffer pixels via `fb / viewport_rect` (the
-    /// viewport rect is the zoom-adjusted `RawInput.screen_rect`), then add
-    /// the overlay window's physical origin.
+    /// Use the same points-to-pixels ratio as rendering, then add the overlay
+    /// window's physical origin.
     fn screen_rect(
         overlay: &GlfwBackend,
         ctx: &egui::Context,
@@ -185,20 +206,20 @@ impl RegionState {
             return None;
         }
         let framebuffer = overlay.window.get_framebuffer_size();
-        let viewport = ctx.viewport_rect();
-        if framebuffer.0 == 0
-            || framebuffer.1 == 0
-            || viewport.width() <= 0.0
-            || viewport.height() <= 0.0
-        {
+        if framebuffer.0 == 0 || framebuffer.1 == 0 {
             return None;
         }
-        let kx = framebuffer.0 as f32 / viewport.width();
-        let ky = framebuffer.1 as f32 / viewport.height();
+        let scale = ctx.pixels_per_point();
         let (ox, oy) = overlay.window.get_pos();
         Some((
-            egui::pos2(ox as f32 + rect.min.x * kx, oy as f32 + rect.min.y * ky),
-            egui::pos2(ox as f32 + rect.max.x * kx, oy as f32 + rect.max.y * ky),
+            egui::pos2(
+                ox as f32 + rect.min.x * scale,
+                oy as f32 + rect.min.y * scale,
+            ),
+            egui::pos2(
+                ox as f32 + rect.max.x * scale,
+                oy as f32 + rect.max.y * scale,
+            ),
         ))
     }
 }
@@ -288,8 +309,7 @@ impl DisplayLoop {
         tracing::info!("entering overlay display loop");
         let Self { overlay, gfx, app } = &mut self;
         let ctx = egui::Context::default();
-        // Ctrl +/-/0 must never rescale the overlay while the user is
-        // aiming in game; the whole-UI scale is fixed at UI_SCALE.
+        // Only the saved control-window setting changes the UI scale.
         ctx.options_mut(|options| options.zoom_with_keyboard = false);
         let ui_rect_handle = app.ui_rect_handle();
 
@@ -327,7 +347,10 @@ impl DisplayLoop {
             let fps = app.fps_ema;
             let ui_visible = app.ui_visible();
             let (origin_x, origin_y) = overlay.window.get_pos();
-            let origin = (origin_x as f32, origin_y as f32);
+            let origin = (
+                origin_x as f32 / overlay.scale,
+                origin_y as f32 / overlay.scale,
+            );
 
             // The interactive-region union belongs to the whole frame: the
             // host control window records into it before the Lua UIs add
@@ -335,18 +358,14 @@ impl DisplayLoop {
             // which would drop the control window and leave it
             // click-through).
             ui_rect_handle.set(None);
-            render_pass(&ctx, gfx, overlay, |ui| {
+            let ui_scale = app.ui_scale();
+            render_pass(&ctx, gfx, overlay, ui_scale, |ui| {
                 let ctx = ui.ctx();
                 if ui_visible {
                     app.control_window(ctx, &ui_rect_handle);
                 }
                 app.run_lua_frame(ctx, now, ui_visible, origin, fps);
             });
-
-            // Apply zoom after the pass: egui consumes it at the next
-            // `run_ui`, whose ratio hack then scales the previous (valid)
-            // screen_rect instead of the never-set default.
-            ctx.set_zoom_factor(UI_SCALE);
 
             update_pointer_region(overlay, &ctx, &mut region, ui_visible, ui_rect_handle.get());
 
