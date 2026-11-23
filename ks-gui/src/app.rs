@@ -37,9 +37,10 @@ mod win32 {
     }
 }
 
+const MIN_UI_SCALE: u16 = 75;
 const DEFAULT_UI_SCALE: u16 = 100;
 const UI_SCALE_STEP: u16 = 5;
-const MAX_UI_SCALE: u16 = 200;
+const MAX_UI_SCALE: u16 = 125;
 const UI_SCALE_KEY: &str = "gui.ui_scale_percent";
 
 /// Overlay presentation cadence: 100 Hz. Lua `OnUpdate` runs once per
@@ -83,7 +84,7 @@ impl KernelScriptApp {
             let ui_scale = match store.get(UI_SCALE_KEY) {
                 Some(crate::config_store::ConfigValue::Int(value)) => {
                     let step = i64::from(UI_SCALE_STEP);
-                    let bounded = value.clamp(i64::from(DEFAULT_UI_SCALE), i64::from(MAX_UI_SCALE));
+                    let bounded = value.clamp(i64::from(MIN_UI_SCALE), i64::from(MAX_UI_SCALE));
                     ((bounded + step / 2) / step * step) as u16
                 }
                 _ => DEFAULT_UI_SCALE,
@@ -189,7 +190,7 @@ impl KernelScriptApp {
                 fps_changed = ui.checkbox(&mut self.show_fps, strings.show_fps).changed();
                 ui.label(format!("{} · {}%", strings.ui_scale, self.ui_scale_draft));
                 let slider = ui.add(
-                    egui::Slider::new(&mut self.ui_scale_draft, DEFAULT_UI_SCALE..=MAX_UI_SCALE)
+                    egui::Slider::new(&mut self.ui_scale_draft, MIN_UI_SCALE..=MAX_UI_SCALE)
                         .step_by(f64::from(UI_SCALE_STEP))
                         .show_value(false),
                 );
